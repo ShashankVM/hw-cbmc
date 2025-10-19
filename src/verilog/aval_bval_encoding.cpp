@@ -36,8 +36,7 @@ bv_typet aval_bval_type(std::size_t width, irep_idt source_type)
 
 bv_typet lower_to_aval_bval(const typet &src)
 {
-  PRECONDITION(
-    src.id() == ID_verilog_unsignedbv || src.id() == ID_verilog_signedbv);
+  PRECONDITION(is_four_valued(src));
   return aval_bval_type(to_bitvector_type(src).get_width(), src.id());
 }
 
@@ -75,9 +74,7 @@ typet aval_bval_underlying(const typet &src)
 
 constant_exprt lower_to_aval_bval(const constant_exprt &src)
 {
-  PRECONDITION(
-    src.type().id() == ID_verilog_signedbv ||
-    src.type().id() == ID_verilog_unsignedbv);
+  PRECONDITION(is_four_valued(src.type()));
 
   auto new_type = lower_to_aval_bval(src.type());
   auto width = aval_bval_width(new_type);
@@ -256,7 +253,7 @@ exprt has_xz(const exprt &expr)
     return false_exprt{}; // it's two-valued
 }
 
-/// return 'x', one bit, in aval_bval encoding
+/// return 'x'
 exprt make_x(const typet &type)
 {
   PRECONDITION(is_four_valued(type));
@@ -335,6 +332,75 @@ exprt aval_bval(const not_exprt &expr)
     not_exprt{extractbit_exprt{expr.op(), natural_typet{}.zero_expr()}};
   auto x = make_x(type);
   return if_exprt{has_xz, x, aval_bval_conversion(not_expr, x.type())};
+}
+
+exprt aval_bval_reduction(const unary_exprt &expr)
+{
+  auto &type = expr.type();
+  auto type_aval_bval = lower_to_aval_bval(type);
+  PRECONDITION(is_four_valued(type));
+  PRECONDITION(is_aval_bval(expr.op()));
+
+  auto has_xz = ::has_xz(expr.op());
+  auto x = make_x(type);
+  auto op_aval = aval(expr.op());
+  auto op_bval = bval(expr.op());
+
+  if(expr.id() == ID_reduction_xor || expr.id() == ID_reduction_xnor)
+  {
+    auto reduction_expr = unary_exprt{expr.id(), op_aval, bool_typet{}};
+    return if_exprt{has_xz, x, aval_bval_conversion(reduction_expr, x.type())};
+  }
+  else if(expr.id() == ID_reduction_and || expr.id() == ID_reduction_nand)
+  {
+    auto has_zero = notequal_exprt{
+      bitor_exprt{op_aval, op_bval},
+      to_bv_type(op_aval.type()).all_ones_expr()};
+
+    auto one = combine_aval_bval(
+      bv_typet{1}.all_ones_expr(),
+      bv_typet{1}.all_zeros_expr(),
+      type_aval_bval);
+    auto zero = combine_aval_bval(
+      bv_typet{1}.all_zeros_expr(),
+      bv_typet{1}.all_zeros_expr(),
+      type_aval_bval);
+
+    if(expr.id() == ID_reduction_and)
+    {
+      return if_exprt{has_zero, zero, if_exprt{has_xz, x, one}};
+    }
+    else // nand
+    {
+      return if_exprt{has_zero, one, if_exprt{has_xz, x, zero}};
+    }
+  }
+  else if(expr.id() == ID_reduction_or || expr.id() == ID_reduction_nor)
+  {
+    auto has_one = notequal_exprt{
+      bitand_exprt{op_aval, bitnot_exprt{op_bval}},
+      to_bv_type(op_aval.type()).all_zeros_expr()};
+
+    auto one = combine_aval_bval(
+      bv_typet{1}.all_ones_expr(),
+      bv_typet{1}.all_zeros_expr(),
+      type_aval_bval);
+    auto zero = combine_aval_bval(
+      bv_typet{1}.all_zeros_expr(),
+      bv_typet{1}.all_zeros_expr(),
+      type_aval_bval);
+
+    if(expr.id() == ID_reduction_or)
+    {
+      return if_exprt{has_one, one, if_exprt{has_xz, x, zero}};
+    }
+    else // nor
+    {
+      return if_exprt{has_one, zero, if_exprt{has_xz, x, one}};
+    }
+  }
+  else
+    PRECONDITION(false);
 }
 
 exprt aval_bval(const bitnot_exprt &expr)
@@ -469,4 +535,34 @@ exprt aval_bval(const shift_exprt &expr)
 
   auto x = make_x(expr.type());
   return if_exprt{distance_has_xz, x, combined};
+}
+
+exprt default_aval_bval_lowering(const exprt &expr)
+{
+  auto &type = expr.type();
+
+  PRECONDITION(is_four_valued(type));
+
+  exprt::operandst disjuncts;
+  for(auto &op : expr.operands())
+    disjuncts.push_back(has_xz(op));
+
+  auto has_xz = disjunction(disjuncts);
+
+  exprt two_valued_expr = expr; // copy
+
+  for(auto &op : two_valued_expr.operands())
+    op = aval_underlying(op); // replace by aval
+
+  if(type.id() == ID_verilog_unsignedbv)
+    two_valued_expr.type() = unsignedbv_typet{to_bitvector_type(type).width()};
+  else if(type.id() == ID_verilog_signedbv)
+    two_valued_expr.type() = signedbv_typet{to_bitvector_type(type).width()};
+  else
+    PRECONDITION(false);
+
+  return if_exprt{
+    has_xz,
+    make_x(type),
+    aval_bval_conversion(two_valued_expr, lower_to_aval_bval(type))};
 }

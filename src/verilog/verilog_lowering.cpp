@@ -560,6 +560,17 @@ exprt verilog_lowering(exprt expr)
     else
       return expr; // leave as is
   }
+  else if(
+    expr.id() == ID_reduction_or || expr.id() == ID_reduction_and ||
+    expr.id() == ID_reduction_nor || expr.id() == ID_reduction_nand ||
+    expr.id() == ID_reduction_xor || expr.id() == ID_reduction_xnor)
+  {
+    // encode into aval/bval
+    if(is_four_valued(expr.type()))
+      return aval_bval_reduction(to_unary_expr(expr));
+    else
+      return expr; // leave as is
+  }
   else if(expr.id() == ID_verilog_iff)
   {
     auto &iff = to_verilog_iff_expr(expr);
@@ -614,9 +625,23 @@ exprt verilog_lowering(exprt expr)
     {
       // turn into floatbv
       expr.type() = verilog_lowering(expr.type());
+      return expr;
     }
-
-    return expr;
+    else if(is_four_valued(expr))
+    {
+      return default_aval_bval_lowering(expr);
+    }
+    else
+      return expr;
+  }
+  else if(
+    expr.id() == ID_plus || expr.id() == ID_minus || expr.id() == ID_mult ||
+    expr.id() == ID_div || expr.id() == ID_mod)
+  {
+    if(is_four_valued(expr))
+      return default_aval_bval_lowering(expr);
+    else
+      return expr;
   }
   else if(expr.id() == ID_lshr || expr.id() == ID_ashr || expr.id() == ID_shl)
   {
