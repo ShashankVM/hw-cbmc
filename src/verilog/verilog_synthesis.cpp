@@ -649,8 +649,7 @@ void verilog_synthesist::assignment_rec(
   {
     assert(value_map!=NULL);
 
-    exprt new_rhs(rhs), new_value;
-    assignment_rec(lhs, new_rhs, new_value); // start of recursion
+    auto new_value = assignment_rec(lhs, rhs); // start of recursion
 
     if(new_value.is_not_nil())
     {
@@ -683,15 +682,11 @@ Function: verilog_synthesist::assignment_rec
 
 \*******************************************************************/
 
-void verilog_synthesist::assignment_rec(
-  const exprt &lhs,
-  exprt &rhs,
-  exprt &new_value)
+exprt verilog_synthesist::assignment_rec(const exprt &lhs, const exprt &rhs)
 {
   if(lhs.id()==ID_symbol)
   {
-    new_value.swap(rhs);
-    rhs.clear();
+    return rhs;
   }
   else if(lhs.id()==ID_index ||
           lhs.id()==ID_extractbit)
@@ -718,7 +713,7 @@ void verilog_synthesist::assignment_rec(
     new_rhs.where() = synth_expr(new_rhs.where(), symbol_statet::CURRENT);
 
     // do the value
-    assignment_rec(lhs_array, new_rhs, new_value); // recursive call
+    return assignment_rec(lhs_array, new_rhs); // recursive call
   }
   else if(lhs.id() == ID_verilog_non_indexed_part_select)
   {
@@ -749,8 +744,7 @@ void verilog_synthesist::assignment_rec(
     // redundant?
     if(from == 0 && to == get_width(lhs_src.type()) - 1)
     {
-      assignment_rec(lhs_src, rhs, new_value); // recursive call
-      return;
+      return assignment_rec(lhs_src, rhs); // recursive call
     }
 
     // turn
@@ -791,25 +785,18 @@ void verilog_synthesist::assignment_rec(
       new_rhs.add_to_operands(std::move(rhs_extractbit));
 
       // do the value
-      assignment_rec(lhs_src, new_rhs, new_value); // recursive call
+      exprt new_value = assignment_rec(lhs_src, new_rhs); // recursive call
 
-      if(last_value.is_nil())
-        last_value.swap(new_value);
-      else
+      if(last_value.is_not_nil())
       {
-        // merge the withs
-        assert(new_value.id() == ID_with);
-        assert(new_value.operands().size() == 3);
-        assert(last_value.id() == ID_with);
-        assert(last_value.operands().size() >= 3);
-
-        last_value.add_to_operands(std::move(to_with_expr(new_value).where()));
-        last_value.add_to_operands(
-          std::move(to_with_expr(new_value).new_value()));
+        // chain the withs
+        to_with_expr(new_value).old() = std::move(last_value);
       }
+
+      last_value = std::move(new_value);
     }
 
-    new_value.swap(last_value);
+    return last_value;
   }
   else if(
     lhs.id() == ID_verilog_indexed_part_select_plus ||
@@ -878,25 +865,18 @@ void verilog_synthesist::assignment_rec(
       new_rhs.add_to_operands(std::move(rhs_extractbit));
 
       // do the value
-      assignment_rec(lhs_src, new_rhs, new_value); // recursive call
+      exprt new_value = assignment_rec(lhs_src, new_rhs); // recursive call
 
-      if(last_value.is_nil())
-        last_value.swap(new_value);
-      else
+      if(last_value.is_not_nil())
       {
-        // merge the withs
-        assert(new_value.id() == ID_with);
-        assert(new_value.operands().size() == 3);
-        assert(last_value.id() == ID_with);
-        assert(last_value.operands().size() >= 3);
-
-        last_value.add_to_operands(std::move(to_with_expr(new_value).where()));
-        last_value.add_to_operands(
-          std::move(to_with_expr(new_value).new_value()));
+        // chain the withs
+        to_with_expr(new_value).old() = std::move(last_value);
       }
+
+      last_value = std::move(new_value);
     }
 
-    new_value.swap(last_value);
+    return last_value;
   }
   else if(lhs.id() == ID_member)
   {
@@ -918,7 +898,7 @@ void verilog_synthesist::assignment_rec(
         synth_compound, member_designatort{component_name}, rhs};
 
       // recursive call
-      assignment_rec(lhs_compound, new_rhs, new_value); // recursive call
+      return assignment_rec(lhs_compound, new_rhs); // recursive call
     }
     else
     {
@@ -929,24 +909,6 @@ void verilog_synthesist::assignment_rec(
   {
     throw errort() << "unexpected lhs: " << lhs.id();
   }
-
-  #if 0
-  // do "with" merging
-
-  if(new_value.id()==ID_with &&
-     new_value.op0().id()==ID_with)
-  {
-    exprt tmp;
-
-    tmp.swap(new_value.op0());
-
-    tmp.reserve_operands(tmp.operands().size()+2);
-    tmp.add_to_operands(std::move(new_value.op1()));
-    tmp.add_to_operands(std::move(new_value.op2()));
-
-    new_value.swap(tmp);
-  }
-  #endif
 }
 
 /*******************************************************************\
@@ -3422,6 +3384,9 @@ void verilog_synthesist::synth_module_item(
   {
   }
   else if(module_item.id() == ID_verilog_sequence_declaration)
+  {
+  }
+  else if(module_item.id() == ID_function_call)
   {
   }
   else
