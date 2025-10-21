@@ -139,8 +139,8 @@ void report_results(
 
       if(property.has_witness_trace())
       {
-        auto term = [&property]()
-        { return property.is_exists_path() ? "Trace" : "Counterexample"; 
+        auto term = [&property]() {
+          return property.is_exists_path() ? "Trace" : "Counterexample";
         };
 
         if(cmdline.isset("trace"))
