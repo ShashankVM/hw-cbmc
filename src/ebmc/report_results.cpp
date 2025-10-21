@@ -109,7 +109,7 @@ void report_results(
 
       switch(property.status)
       {
-        // clang-format off
+      // clang-format off
       case statust::ASSUMED: message.result() << messaget::blue; break;
       case statust::PROVED: message.result() << messaget::green; break;
       case statust::PROVED_WITH_BOUND: message.result() << messaget::green; break;
@@ -140,7 +140,8 @@ void report_results(
       if(property.has_witness_trace())
       {
         auto term = [&property]()
-        { return property.is_exists_path() ? "Trace" : "Counterexample"; };
+        { return property.is_exists_path() ? "Trace" : "Counterexample"; 
+        };
 
         if(cmdline.isset("trace"))
         {
